@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="fcDZzm" name="MyArpeggiator" projectType="audioplug" jucerVersion="5.4.3"
-              pluginFormats="buildAU,buildStandalone,buildVST3" pluginCharacteristicsValue="pluginIsMidiEffectPlugin,pluginProducesMidiOut,pluginWantsMidiIn">
+              pluginFormats="buildAU,buildStandalone,buildVST,buildVST3" pluginCharacteristicsValue="pluginIsMidiEffectPlugin,pluginProducesMidiOut,pluginWantsMidiIn">
   <MAINGROUP id="KTtlQy" name="MyArpeggiator">
     <GROUP id="{4D335CD6-4E19-A4AE-5704-51C927513DE6}" name="Source">
       <FILE id="HO7upe" name="PluginProcessor.cpp" compile="1" resource="0"

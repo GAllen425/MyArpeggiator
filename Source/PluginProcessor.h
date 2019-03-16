@@ -19,11 +19,9 @@ class MyArpeggiatorAudioProcessor  : public AudioProcessor
 {
 public:
 
-	int octaveDownInt;
-	int octaveUpInt;
-	int minNoteLength;
-	int maxNoteLength;
 	float meter;
+
+
     //==============================================================================
     MyArpeggiatorAudioProcessor();
     ~MyArpeggiatorAudioProcessor();
@@ -69,6 +67,11 @@ public:
 
 	float GetClosestMeter(float meter);
 
+	void processInputMidi(MidiBuffer &inMidi);
+
+	int convertGuiMeterToTimebase(float meter);
+
+	int64 calculateNextTime(int64 position);
 
 private:
 	
@@ -79,10 +82,37 @@ private:
 	int time;
 	float rate;
 	SortedSet<int> notes;
-	int bpm;
 	float beatsPerSec;
 	float notesPerBeat;
 	float notesPerSec;
+
+	/**
+	* Time signature numerator
+	*/
+	int timeSignatureNumerator;
+
+	/**
+	 * Time signature denominator
+	 */
+	int timeSignatureDenominator;
+
+	/**
+	* The MIDI channel output notes are sent to.
+	*/
+	int outputMidiChannel;
+
+	/**
+	 * The MIDI channel input notes are read from. Notes from all channels are read if zero.
+	 */
+	int inputMidiChannel;
+
+	/**
+	 * The last position the processor has played, in pulses.
+	 */	
+	int64 lastPosition;
+
+
+
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MyArpeggiatorAudioProcessor)

@@ -24,19 +24,12 @@ MyArpeggiatorAudioProcessor::MyArpeggiatorAudioProcessor()
 	)
 #endif
 {
+	lastPosition = 0;
+	outputMidiChannel = 1;
+	inputMidiChannel = 0;
+
 	state = new AudioProcessorValueTreeState(*this, nullptr);
-
-	state->createAndAddParameter("octave down", "Octave Down", "Octave Down", NormalisableRange<float>(0.0, 3.0, 1.0), 1.0, nullptr, nullptr);
-	state->createAndAddParameter("octave up", "Octave Up", "Octave Up", NormalisableRange<float>(0.0, 3.0, 1.0), 1.0, nullptr, nullptr);
-	state->createAndAddParameter("min note length", "Min Note Length", "Min Note Length", NormalisableRange<float>(1.0, 32.0, 1.0), 1.0, nullptr, nullptr);
-	state->createAndAddParameter("max note length", "Max Note Length", "Max Note Length", NormalisableRange<float>(1.0, 32.0, 1.0), 1.0, nullptr, nullptr);
-	state->createAndAddParameter("meter", "Meter", "Meter", NormalisableRange<float>(0.01, 1.0, 0.01), 1.0, nullptr, nullptr);
-
-
-	state->state = ValueTree("octave down");
-	state->state = ValueTree("octave up");
-	state->state = ValueTree("min note length");
-	state->state = ValueTree("max note length");
+	state->createAndAddParameter("meter", "Meter", "Meter", NormalisableRange<float>(1.0, 4.0, 1.0), 1.0, nullptr, nullptr);
 	state->state = ValueTree("meter");
 
 }
@@ -118,9 +111,6 @@ void MyArpeggiatorAudioProcessor::prepareToPlay (double sampleRate, int samplesP
 	time = 0.0;
 	rate = static_cast<float> (sampleRate);
 
-	bpm = 120;
-	beatsPerSec = bpm / 60.0;
-
 }
 
 void MyArpeggiatorAudioProcessor::releaseResources()
@@ -155,68 +145,54 @@ bool MyArpeggiatorAudioProcessor::isBusesLayoutSupported (const BusesLayout& lay
 
 void MyArpeggiatorAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midiMessages)
 {
+	// Get Params
+	meter = convertGuiMeterToTimebase(*state->getRawParameterValue("meter")); 
+	DBG (String(meter));
 	// the audio buffer in a midi effect will have zero channels!
 	jassert(buffer.getNumChannels() == 0);
 
-	octaveDownInt = *state->getRawParameterValue("octave down");
-	octaveUpInt = *state->getRawParameterValue("octave up");
-	minNoteLength = *state->getRawParameterValue("min note length");
-	maxNoteLength = *state->getRawParameterValue("max note length");
-	meter = *state->getRawParameterValue("meter");
+	// Get number of samples from buffer (sometimes breaks and sets to 0)
+	auto numSamples = buffer.getNumSamples();
 
-	notesPerBeat = 1.0 / GetClosestMeter(meter);
-	notesPerSec = beatsPerSec * notesPerBeat;
-	/*
-	AudioPlayHead* playHead = getPlayHead();
-	if (playHead == nullptr)
-	{
-		// exit as playhead not found
-		return;
-	}
+	// Process Midi Input
+	processInputMidi(midiMessages);
 
 	AudioPlayHead::CurrentPositionInfo playheadPositionInfo;
-	playHead->getCurrentPosition(playheadPositionInfo);
-	*/
+	getPlayHead()->getCurrentPosition(playheadPositionInfo);
 
+	this->timeSignatureNumerator = playheadPositionInfo.timeSigNumerator;
+	this->timeSignatureDenominator = playheadPositionInfo.timeSigDenominator;
 
-	auto numberSamples = 256;// buffer.getNumSamples();
-	//auto noteDuration = static_cast<int> (std::ceil(rate * 0.25f * 0.1f));
-	auto noteDuration = static_cast<int> (std::ceil( rate / notesPerSec )); // eg X samples per note
-
-	MidiMessage midiMessage;
-	int samplePosition = 0;
-
-	for (MidiBuffer::Iterator it(midiMessages); it.getNextEvent(midiMessage, samplePosition);)
+	if (playheadPositionInfo.isPlaying)
 	{
-		if (midiMessage.isNoteOn()) notes.add(midiMessage.getNoteNumber());
-		else if (midiMessage.isNoteOff()) notes.removeValue(midiMessage.getNoteNumber());
-	}
+		auto pulseLength = 60.0 / (playheadPositionInfo.bpm * meter);
+		auto pulseSamples = getSampleRate() * pulseLength;
 
-	midiMessages.clear();
+		auto lastPosition = static_cast<int64>(std::floor(playheadPositionInfo.ppqPosition * meter));
+		auto position = lastPosition + static_cast<int64>(std::ceil(numSamples / pulseSamples));
 
-//	DBG("Time : " + String(time));
-//	DBG("numSamples : " + String(numberSamples));
-//	DBG("noteDuration : " + String(noteDuration));
+		//time in units of notes e.g. quarter notes or eight notes etc
+		auto time = calculateNextTime(position);
 
-	if ((time + numberSamples) >= noteDuration)
-	{
-		auto offset = jmax(0, jmin ((int) (noteDuration - time), numberSamples - 1));
-
-		if (lastNoteValue > 0)
+		if (time < position)
 		{
-			midiMessages.addEvent(MidiMessage::noteOff(1, lastNoteValue), offset);
-			lastNoteValue = -1;
-		}
+			auto offset = jmax(0, jmin((int)(pulseLength - time), numSamples - 1));
 
-		if (notes.size() > 0)
-		{
-			currentNote = (currentNote + 1) % notes.size();
-			lastNoteValue = notes[currentNote];
-			midiMessages.addEvent(MidiMessage::noteOn(1, lastNoteValue, (uint8)127), offset);
+			if (lastNoteValue > 0)
+			{
+				midiMessages.addEvent(MidiMessage::noteOff(1, lastNoteValue), offset);
+				lastNoteValue = -1;
+			}
+
+			if (notes.size() > 0)
+			{
+				currentNote = (currentNote + 1) % notes.size();
+				lastNoteValue = notes[currentNote];
+				midiMessages.addEvent(MidiMessage::noteOn(1, lastNoteValue, (uint8)127), offset);
+			}
 		}
 	}
 
-	time = (time + numberSamples) % noteDuration;
 }
 
 AudioProcessorValueTreeState& MyArpeggiatorAudioProcessor::getState()
@@ -291,4 +267,47 @@ float MyArpeggiatorAudioProcessor::GetClosestMeter(float meter)
 	}
 
 	return closestMeter;
+}
+
+void MyArpeggiatorAudioProcessor::processInputMidi(MidiBuffer &inMidi) {
+	int sample;
+	MidiBuffer outMidi;
+	MidiMessage message;
+
+	for (MidiBuffer::Iterator i(inMidi); i.getNextEvent(message, sample);) 
+	{
+		if (inputMidiChannel == 0 || message.getChannel() == inputMidiChannel) 
+		{
+			if (message.isNoteOn()) 
+			{
+				notes.add(message.getNoteNumber());
+			}
+			else if (message.isNoteOff()) 
+			{
+				notes.removeValue(message.getNoteNumber());
+			}
+			else 
+			{
+				outMidi.addEvent(message, sample);
+			}
+		}
+		else 
+		{
+			outMidi.addEvent(message, sample);
+		}
+	}
+
+	inMidi.swapWith(outMidi);
+}
+
+int MyArpeggiatorAudioProcessor::convertGuiMeterToTimebase(float meter)
+{				
+	return std::pow(2,(int)meter-1);
+}
+
+int64 MyArpeggiatorAudioProcessor::calculateNextTime(int64 position)
+{
+	int64 result;
+	
+	return  result = position + meter;
 }
